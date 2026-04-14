@@ -1,9 +1,14 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+import os
+import sqlite3
 
 app = FastAPI()
 
-# SECURITY VULNERABILITY: Hardcoded Secret
-SECRET_KEY = "super-secret-key-12345"
+# ✅ FIX 1: Load secret from environment variable
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+if not SECRET_KEY:
+    raise Exception("SECRET_KEY not set in environment")
 
 @app.get("/")
 def read_root():
@@ -11,16 +16,24 @@ def read_root():
 
 @app.get("/items/{item_id}")
 def read_item(item_id: str):
-    # This is where a DAST tool might try to inject SQL or scripts
-    return {"item_id": item_id, "internal_key": SECRET_KEY}
-
-import sqlite3
+    # ✅ FIX 2: Do NOT expose secrets
+    return {"item_id": item_id}
 
 @app.get("/search")
 def search(user_input: str):
-    conn = sqlite3.connect("users.db")
-    cursor = conn.cursor()
-    # SonarCloud will flag this as a VULNERABILITY (SQL Injection)
-    query = f"SELECT * FROM users WHERE name = '{user_input}'"
-    cursor.execute(query)
-    return cursor.fetchall()
+    try:
+        conn = sqlite3.connect("users.db")
+        cursor = conn.cursor()
+
+        # ✅ FIX 3: Use parameterized query (prevents SQL injection)
+        query = "SELECT * FROM users WHERE name = ?"
+        cursor.execute(query, (user_input,))
+
+        results = cursor.fetchall()
+        return {"data": results}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Database error")
+
+    finally:
+        conn.close()
